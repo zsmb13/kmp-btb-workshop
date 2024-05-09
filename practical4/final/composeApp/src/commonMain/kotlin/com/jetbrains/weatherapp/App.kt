@@ -30,11 +30,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.navigator.CurrentScreen
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.Navigator
-import cafe.adriel.voyager.navigator.currentOrThrow
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.jetbrains.weatherapp.cache.CountrySDK
 import com.jetbrains.weatherapp.country.CapitalInfo
 import com.jetbrains.weatherapp.country.Country
@@ -55,75 +53,35 @@ import weatherapp.composeapp.generated.resources.back
 @Composable
 fun App() {
     MaterialTheme {
-        Navigator(HomeScreen()) { navigator ->
-            Scaffold(topBar = {
-                if (navigator.canPop)
-                    Button(modifier = Modifier.padding(4.dp).width(48.dp).height(48.dp), onClick = {
-                        navigator.pop()
-                    }) {
-                        val painterResource = painterResource(Res.drawable.back)
-                        Image(
-                            painter = painterResource,
-                            contentDescription = "Back"
-                        )
-                    }
-            }) {
-                CurrentScreen()
-            }
-        }
-    }
-}
+        val navController = rememberNavController()
 
-class HomeScreen : Screen {
-    @Composable
-    override fun Content() {
-        Surface {
-            var listCountries: List<Country> by remember { mutableStateOf(listOf()) }
-
-            val countryCode = getCountryCode().getCountryCode()
-
-            LaunchedEffect(Unit) {
-                val tempCountries =
-                    CountrySDK().getAllCountries().sortedBy { it.name.common }.toMutableList()
-                val currentCountry = tempCountries.first { it.cca2 == countryCode }
-                tempCountries.remove(currentCountry)
-                tempCountries.add(0, currentCountry)
-                listCountries = tempCountries
-            }
-
-            val time = remember { TimeApi().actualTime }.collectAsState()
-
-            Column {
-                Text(
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(8.dp),
-                    text = "Local time: ${time.value}",
-                    style = MaterialTheme.typography.h4
-                )
-                LazyColumn() {
-                    items(items = listCountries) {
-                        CountryCard(
-                            modifier = Modifier,
-                            country = it,
-                            currentCountry = it.cca2 == countryCode
-                        )
-                    }
+        Scaffold(topBar = {
+            if (navController.previousBackStackEntry != null) {
+                Button(modifier = Modifier.padding(4.dp).width(48.dp).height(48.dp), onClick = {
+                    navController.popBackStack()
+                }) {
+                    val painterResource = painterResource(Res.drawable.back)
+                    Image(
+                        painter = painterResource,
+                        contentDescription = "Back"
+                    )
                 }
             }
-        }
-    }
-}
-
-data class WeatherScreen(val cityName: String, val lat: Double, val long: Double) : Screen {
-    @Composable
-    override fun Content() {
-        Surface {
-            LazyColumn {
-                item {
-                    WeatherCard(
-                        modifier = Modifier,
-                        cityName = cityName,
-                        lat = lat,
-                        long = long
+        }) {
+            NavHost(navController, startDestination = "home") {
+                composable("home") {
+                    HomeScreen(onSelectCapital = { capital ->
+                        navController.navigate("weather/${capital.cityName}/${capital.lat}/${capital.lon}")
+                    })
+                }
+                composable("weather/{city}/{lat}/{lon}") { backstackEntry ->
+                    val args = backstackEntry.arguments!!
+                    WeatherScreen(
+                        SelectedCapital(
+                            cityName = args.getString("city")!!,
+                            lat = args.getString("lat")!!.toDouble(),
+                            lon = args.getString("lat")!!.toDouble(),
+                        )
                     )
                 }
             }
@@ -132,7 +90,70 @@ data class WeatherScreen(val cityName: String, val lat: Double, val long: Double
 }
 
 @Composable
-fun CountryCard(modifier: Modifier, country: Country, currentCountry: Boolean) {
+fun HomeScreen(
+    onSelectCapital: (SelectedCapital) -> Unit,
+) {
+    Surface {
+        var listCountries: List<Country> by remember { mutableStateOf(listOf()) }
+
+        val countryCode = getCountryCode().getCountryCode()
+
+        LaunchedEffect(Unit) {
+            val tempCountries =
+                CountrySDK().getAllCountries().sortedBy { it.name.common }.toMutableList()
+            val currentCountry = tempCountries.first { it.cca2 == countryCode }
+            tempCountries.remove(currentCountry)
+            tempCountries.add(0, currentCountry)
+            listCountries = tempCountries
+        }
+
+        val time = remember { TimeApi().actualTime }.collectAsState()
+
+        Column {
+            Text(
+                modifier = Modifier.align(Alignment.CenterHorizontally).padding(8.dp),
+                text = "Local time: ${time.value}",
+                style = MaterialTheme.typography.h4
+            )
+            LazyColumn {
+                items(items = listCountries) {
+                    CountryCard(
+                        modifier = Modifier,
+                        country = it,
+                        currentCountry = it.cca2 == countryCode,
+                        onSelectCapital = onSelectCapital,
+                    )
+                }
+            }
+        }
+    }
+}
+
+data class SelectedCapital(val cityName: String, val lat: Double, val lon: Double)
+
+@Composable
+fun WeatherScreen(selectedCapital: SelectedCapital) {
+    Surface {
+        LazyColumn {
+            item {
+                WeatherCard(
+                    modifier = Modifier,
+                    cityName = selectedCapital.cityName,
+                    lat = selectedCapital.lat,
+                    long = selectedCapital.lon
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CountryCard(
+    country: Country,
+    currentCountry: Boolean,
+    onSelectCapital: (SelectedCapital) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Card(
         modifier = modifier.fillMaxWidth().padding(4.dp),
         elevation = 10.dp,
@@ -140,31 +161,39 @@ fun CountryCard(modifier: Modifier, country: Country, currentCountry: Boolean) {
     ) {
         if (currentCountry) {
             Box(modifier = Modifier.border(5.dp, Color.DarkGray)) {
-                Country(Modifier, country)
+                Country(country, onSelectCapital)
             }
         } else {
-            Country(Modifier, country)
+            Country(country, onSelectCapital)
         }
     }
 }
 
 @Composable
-fun Country(modifier: Modifier, country: Country) {
+fun Country(
+    country: Country,
+    onSelectCapital: (SelectedCapital) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Row(modifier = modifier.fillMaxSize().padding(8.dp)) {
         Column(modifier = Modifier.width(130.dp).height(128.dp)) {
-            Flag(modifier = Modifier.fillMaxWidth().padding(8.dp), country.flags)
+            Flag(country.flags, modifier = Modifier.fillMaxWidth().padding(8.dp))
         }
         Column(modifier = Modifier.fillMaxWidth().height(128.dp).padding(8.dp)) {
             CountryNames(name = country.name)
             if (country.capital.isNotEmpty() && country.capitalInfo != null) {
-                WeatherButtons(capitals = country.capital, capitalInfo = country.capitalInfo)
+                WeatherButtons(
+                    capitals = country.capital,
+                    capitalInfo = country.capitalInfo,
+                    onSelectCapital = onSelectCapital,
+                )
             }
         }
     }
 }
 
 @Composable
-fun Flag(modifier: Modifier = Modifier, flag: Flags) {
+fun Flag(flag: Flags, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier,
         elevation = 10.dp,
@@ -191,9 +220,9 @@ fun CountryNames(modifier: Modifier = Modifier, name: Name) {
 fun WeatherButtons(
     modifier: Modifier = Modifier,
     capitals: List<String>,
-    capitalInfo: CapitalInfo
+    capitalInfo: CapitalInfo,
+    onSelectCapital: (SelectedCapital) -> Unit,
 ) {
-    val navigator = LocalNavigator.currentOrThrow
     Row(
         modifier = modifier.fillMaxSize(),
         verticalAlignment = Alignment.Bottom
@@ -201,12 +230,8 @@ fun WeatherButtons(
         LazyColumn {
             items(capitals) {
                 Button(onClick = {
-                    navigator.push(
-                        WeatherScreen(
-                            cityName = it,
-                            lat = capitalInfo.latlng[0],
-                            long = capitalInfo.latlng[1]
-                        )
+                    onSelectCapital(
+                        SelectedCapital(cityName = it, lat = capitalInfo.latlng[0], lon = capitalInfo.latlng[1])
                     )
                 }) {
                     Text(text = "$it weather")
@@ -249,7 +274,10 @@ fun WeatherCard(modifier: Modifier, cityName: String, lat: Double, long: Double)
                     "Feels like: ${weather.main.feels_like} 'C / ${celsiusToFahrenheit(weather.main.feels_like)} 'F",
                     style = MaterialTheme.typography.body1
                 )
-                Text("Temp: ${weather.main.temp} 'C / ${celsiusToFahrenheit(weather.main.temp)} 'F", style = MaterialTheme.typography.body1)
+                Text(
+                    "Temp: ${weather.main.temp} 'C / ${celsiusToFahrenheit(weather.main.temp)} 'F",
+                    style = MaterialTheme.typography.body1
+                )
             }
         }
     }
